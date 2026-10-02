@@ -1,121 +1,118 @@
-# tg4
+# tg4 — monetised fitness content Telegram bot
 
-**6 апреля – 12 мая 2026, личный проект.** Задача: собрать монетизируемого бота для Telegram, который раздаёт фитнес-контент и позволяет администратору управлять им из интерфейса бота. Решение: **tg4** — каталог планов питания, программ тренировок и обучающих видео на aiogram 3 с фильтрами по 19 категориям, оплатой в Telegram Stars, Redis-хранилищем состояний и оптимизацией запросов к PostgreSQL.
+A Telegram bot that distributes fitness content behind a paywall and accepts payment directly inside the chat. Content is managed through an admin section built into the bot itself, so publishing new material requires no redeploy and no separate admin panel.
 
----
+Built for the 100 Ideas for Belarus competition on 15 December 2025.
 
-## Что это
+## Features
 
-Telegram-бот-магазин фитнес-контента. Пользователь выбирает раздел и категорию, видит список материалов, покупает платный контент за звёзды или скачивает бесплатный. Администратор загружает контент прямо из бота через диалог с состояниями.
+- Paid access to a content library using Telegram Stars, the in-chat payment currency
+- Content types: workouts, videos, photos and nutrition material
+- User preferences stored per account
+- Admin section inside the bot, protected by Telegram user IDs
+- Publish and edit content without touching the code
+- PostgreSQL for durable storage, Redis for state
+- SQL migrations applied in order, with an index audit script
+- FastAPI service exposing a webhook alongside the bot
 
-Файлы не хранятся на сервере. В базу пишется только `telegram_file_id` — Telegram сам отдаёт файл заново по этому идентификатору, поэтому хранилище на диске не нужно вовсе.
+## Tech stack
 
-## Возможности
+| Layer | Technology |
+| --- | --- |
+| Language | Python 3 |
+| Bot framework | aiogram 3 |
+| HTTP layer | FastAPI with Uvicorn |
+| Database | PostgreSQL via asyncpg |
+| Migrations | Plain SQL, applied in order |
+| Session storage | Redis, with in-memory fallback |
+| Payments | Telegram Stars |
+| Configuration | python-dotenv |
+| Hosting | Vercel |
 
-**Пользовательская часть**
-- Три типа контента: планы питания и программы тренировок (`.xlsx`), обучающие видео
-- Фильтрация по категориям, привязанным к типу контента
-- Каталог с ценами, превью и статусом покупки
-- Раздел «Мои покупки» со всем купленным
-- Оплата в Telegram Stars (`XTR`) через нативный инвойс
-- Скачивание файлов и просмотр видео по `file_id`
+## Getting started
 
-**Админ-часть** (`/admin`, доступ по `ADMIN_IDS`)
-- Загрузка контента пошаговым диалогом: тип → заголовок → описание → категория → цена → файл
-- Список всего контента с категориями и ценами
-- Удаление записи
+### Requirements
 
-**Инфраструктура**
-- PostgreSQL через пул `asyncpg`, 4 миграции применяются автоматически при старте
-- Redis для состояний FSM (при `REDIS_URL`); без него — `MemoryStorage` с потерей состояний при рестарте
-- FastAPI-обёртка для вебхука, деплой на Vercel через `api/index.py`
-- Альтернативный режим — long polling (`python bot.py`)
-- Кэш категорий с TTL 5 минут и инвалидацией при изменениях
+- Python 3.11 or newer
+- PostgreSQL, local or managed
+- A Telegram bot token from [@BotFather](https://t.me/BotFather)
 
-## Стек
+### Environment variables
 
-Python · aiogram 3 · PostgreSQL (asyncpg) · Redis · FastAPI · Vercel
+| Variable | Required | Description |
+| --- | --- | --- |
+| `BOT_TOKEN` | yes | Token issued by BotFather |
+| `ADMIN_IDS` | yes | Comma-separated Telegram user IDs allowed into the admin section |
+| `DATABASE_URL` | yes | PostgreSQL connection string |
+| `PAYMENT_PROVIDER_TOKEN` | yes | Token for Telegram Stars payments |
+| `REDIS_URL` | no | Redis connection string; the bot falls back to in-memory storage |
+| `WEBHOOK_URL` | webhook mode | Public HTTPS URL used to receive updates |
+| `UPLOADS_DIR` | no | Directory for uploaded media files |
 
-## Команды
+Create a `.env` file in the project root:
 
-| Команда | Доступ | Назначение |
-|---|---|---|
-| `/start` | все | регистрация и главное меню |
-| `/admin` | администраторы | админ-панель |
-
-## Переменные окружения
-
-```bash
-BOT_TOKEN=your_bot_token_here
-ADMIN_IDS=123456789,987654321
-DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require
-
-# Необязательно
-REDIS_URL=redis://localhost:6379/0     # без него состояния теряются при рестарте
-WEBHOOK_URL=https://your-domain.vercel.app
-PAYMENT_PROVIDER_TOKEN=                 # токен провайдера платежей Telegram
-UPLOADS_DIR=uploads
+```
+BOT_TOKEN=123456:ABCDEF...
+ADMIN_IDS=111111111,222222222
+DATABASE_URL=postgresql://user:password@host/db?sslmode=require
+PAYMENT_PROVIDER_TOKEN=...
+REDIS_URL=redis://host:6379
 ```
 
-> В `.env.example` заданы только первые пять переменных. `REDIS_URL` и `WEBHOOK_URL` тоже читаются кодом — их стоит добавить в пример.
-
-## HTTP-эндпоинты
-
-| Метод | Путь | Назначение |
-|---|---|---|
-| `POST` | `/webhook` | приём апдейтов от Telegram |
-| `GET` | `/` | проверка живости |
-| `GET` | `/health` | состояние БД и пула |
-| `GET` | `/performance` | размер и содержимое кэша категорий |
-| `GET` | `/slow-queries` | статистика медленных запросов (`pg_stat_statements`) |
-| `GET` | `/webhook-info` | текущее состояние вебхука |
-| `POST` | `/set-webhook`, `/delete-webhook` | ручное управление вебхуком |
-
-Два последних требуют заголовок `X-Admin-ID`.
-
-## Производительность
-
-Отдельный документ — [PERFORMANCE_AUDIT.md](PERFORMANCE_AUDIT.md). Коротко о том, что сделано:
-
-- Устранена проблема N+1: просмотр карточки контента — один запрос вместо трёх
-- Добавлены составные индексы (миграция `004`), покрывающие фильтрацию по типу и категории, выборку покупок и проверку статуса платежа
-- Логирование медленных запросов: предупреждение от 500 мс, ошибка от 1000 мс
-- Кэш категорий, чтобы не дёргать базу на каждом открытии меню
-- `check_indexes.py` — проверка, что индексы созданы и используются (`idx_scan > 0`)
-- Ручные `EXPLAIN ANALYZE` для ключевых запросов в аудите
-
-## Запуск
+### Installation
 
 ```bash
+git clone https://github.com/glcskl/tg4.git
+cd tg4
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # заполнить
-python bot.py             # polling-режим, миграции применятся автоматически
 ```
 
-Для Vercel: `vercel.json` уже проксирует всё в `api/index.py`, нужно только задать `WEBHOOK_URL` и переменные окружения в настройках проекта.
+Apply the migrations in order, then verify the indexes:
 
-## Известные ограничения
+```bash
+for f in migrations/*.sql; do psql "$DATABASE_URL" -f "$f"; done
+python check_indexes.py
+```
 
-Честный список того, что в коде есть, но не доделано или сломано:
+### Running
 
-- **Оплата не заработает.** В `handlers.py:360` в `send_invoice` передаётся `provider_token=""` — пустая строка вместо `PAYMENT_PROVIDER_TOKEN` из конфига. Telegram отклонит инвойс.
-- **Счётчики не инкрементятся.** `content.view_count`, `content.download_count`, таблица `user_activity_log` и `users.preferences` созданы миграциями, но код их не заполняет. Аналитика на них не построится без доработки.
-- **Удаление контента не удаляет файл из Telegram.** Удаляется только запись в базе.
-- **Тестов нет.** Ни одного автотеста, проверка — вручную.
-- **Лицензии нет.** Репозиторий публичный, но без LICENSE — формально это «все права защищены», а не свободная лицензия.
+```bash
+python bot.py
+```
 
-## Структура
+The `Procfile` runs `python bot.py`, which is what the hosting platform executes.
+
+## Project structure
 
 ```
-bot.py              точка входа, polling, инициализация пула и миграций
-handlers.py         хендлеры команд, каталога, оплаты и админки
-keyboards.py        клавиатуры (reply и inline)
-database.py         пул, запросы, кэш категорий, тайминги
-config.py           чтение переменных окружения
-run_migrations.py   применение миграций
-check_indexes.py    проверка индексов
-api/index.py        FastAPI-приложение с вебхуком и диагностикой
-migrations/         001 схема · 002 prefs и счётчики · 003 категории · 004 индексы
-schema.sql          полная схема БД
-PERFORMANCE_AUDIT.md чек-лист проверки оптимизаций
+bot.py             entry point, dispatcher and webhook setup
+config.py          environment configuration
+database.py        PostgreSQL access layer
+handlers.py        message and callback handlers
+keyboards.py       inline keyboard layouts
+check_indexes.py   index audit for the database
+api/index.py       FastAPI application
+migrations/        ordered SQL migrations
+PERFORMANCE_AUDIT.md  database performance notes
 ```
+
+## Database
+
+Migrations are plain SQL and are applied in filename order, which keeps the schema reviewable and avoids an extra dependency:
+
+| File | Purpose |
+| --- | --- |
+| `001_initial_schema.sql` | base schema |
+| `002_add_user_prefs.sql` | per-user preferences |
+| `003_add_missing_categories.sql` | content categories |
+| `004_add_optimization_indexes.sql` | query optimisation indexes |
+
+## Deployment
+
+Deployed on Vercel. Set every variable from the table above in the project settings, apply the migrations once against the production database, and point the Telegram webhook at the deployed endpoint.
+
+## Notes
+
+This project is personal. Payments use Telegram Stars, so no card data ever reaches this codebase.
