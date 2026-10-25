@@ -1,4 +1,4 @@
-# tg4 — monetised fitness content Telegram bot
+# fitness-stars-bot — monetised fitness content Telegram bot
 
 A Telegram bot that distributes fitness content behind a paywall and accepts payment directly inside the chat. Content is managed through an admin section built into the bot itself, so publishing new material requires no redeploy and no separate admin panel.
 
